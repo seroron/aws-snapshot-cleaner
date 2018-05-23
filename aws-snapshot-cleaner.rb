@@ -2,7 +2,9 @@ require 'aws-sdk-ec2'
 require 'optparse'
 
 class AwsSnapshotCleaner
-  def clean_snapshot(mode_remove: false)
+  def clean_snapshot(mode_remove: false,
+                     filter_name: "",
+                     filter_no_name: false)
     unless mode_remove
       puts "This is dry run mode."
     end
@@ -15,6 +17,7 @@ class AwsSnapshotCleaner
     loop do
       attr = {owner_ids: ["self"]}
       attr[:next_token] = ss.next_token unless ss.nil?
+      attr[:filters] = [{name: 'tag:Name', values:["*"+filter_name+"*"]}] unless filter_name.empty?
       
       ss = ec2.describe_snapshots(attr)
       ss.snapshots.each do |s|
@@ -23,7 +26,8 @@ class AwsSnapshotCleaner
           valid_snap = image_ids.include?(ami_id)
 
           unless valid_snap
-            name = s.tags.select{|i| i.key=="Name"}.map(&:value).first
+            name = s.tags.select{|i| i.key=="Name"}.map(&:value).first.to_s
+            next if filter_no_name && !name.empty?
             
             puts "#{s.snapshot_id} (Name:#{name} Size:#{s.size}GiB StartTime:#{s.start_time}) : #{ami_id} is deregistered"
               
@@ -43,7 +47,9 @@ if __FILE__ == $0
   opt = OptionParser.new
 
   args = {}
-  opt.on('-r', '--remove', 'remove snapshot') {|v| args[:mode_remove] = v}
+  opt.on('-r', '--remove', 'remove snapshot')  {|v| args[:mode_remove] = v}
+  opt.on('--filter-name=NAME', 'list snapshots which name includes NAME') {|v| args[:filter_name] = v}
+  opt.on('--filter-no-name',   'list unnamed snapshots') {|v| args[:filter_no_name] = v}
   opt.parse!(ARGV)
   
   AwsSnapshotCleaner.new.clean_snapshot(args)
